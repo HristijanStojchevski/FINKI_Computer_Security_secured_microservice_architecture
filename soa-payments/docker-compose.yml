@@ -1,0 +1,45 @@
+version: '3'
+services:
+  ps_postgres:
+    image: postgres
+    container_name: ps_postgres
+    volumes:
+      - ps-data:/var/lib/postgresql/data
+      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DB=payment_service
+      - POSTGRES_USER=ps_user
+      - POSTGRES_PASSWORD=ps_123
+    networks:
+      - my-network123
+
+
+  py_application:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REFERRALS_IP=127.0.0.1
+      - REFERRALS_PORT=8000
+      - USERS_IP=127.0.0.1
+      - USERS_PORT=8000
+      - PAYMENTS_PORT=8000
+      - SMTP_PORT=465
+      - DATABASE_URI=postgresql://ps_user:ps_123@ps_postgres/payment_service
+      - ME=springconfirm@gmail.com
+      - MP=springauth
+      - SPK=rg3CN5pLXoI00LvYfHmV75vcp84TP5vwgAGqz
+      - SRK=t7ttJYlmMNY00sZLL2IZGgxwHX2ajDoYhLlcn
+    ports:
+      - 5000:8000
+    networks:
+      - my-network123
+
+
+volumes:
+  ps-data:
+networks:
+  my-network123:
+    driver: bridge

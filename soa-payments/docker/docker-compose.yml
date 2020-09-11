@@ -1,0 +1,16 @@
+version: '3'
+services:
+  ps_postgres:
+    image: postgres
+    container_name: ps_postgres
+    volumes:
+      - ps-data:/var/lib/postgresql/data
+      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DB=payment_service
+      - POSTGRES_USER=ps_user
+      - POSTGRES_PASSWORD=ps_123
+volumes:
+  ps-data:

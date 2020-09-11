@@ -1,0 +1,149 @@
+version: '3.4'
+
+networks: 
+  kong-net:
+  keycloak-net:
+
+volumes:
+  kong-datastore:
+  keycloak-datastore:
+
+services:
+  kong-db:
+    image: postgres:11-alpine
+    volumes:
+      - kong-datastore:/var/lib/postgresql/data
+    networks:
+      - kong-net
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB:       api-gw
+      POSTGRES_USER:     kong
+      POSTGRES_PASSWORD: kong
+    restart: on-failure
+
+  kong-session-store:
+    image: redis
+    ports:
+      - 6379:6379
+    restart: on-failure
+
+  kong:
+    build:
+      context: ./     
+    image: kong:2.0.0-alpine-oidc
+    depends_on:
+      - kong-db
+      - kong-session-store
+    networks:
+      - kong-net
+    ports:
+      - "8000:8000" # Listener
+      - "8001:8001" # Admin API
+      - "8443:8443" # Listener  (SSL)
+      - "8444:8444" # Admin API (SSL)
+    environment:
+      KONG_NGINX_PROXY_INCLUDE: ./nginx-redis.kong.conf
+      KONG_DATABASE:         postgres
+      KONG_PG_HOST:          kong-db
+      KONG_PG_PORT:          5432
+      KONG_PG_USER:          kong
+      KONG_PG_PASSWORD:      kong
+      KONG_PG_DATABASE:      api-gw
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG:  /dev/stderr
+      KONG_ADMIN_ERROR_LOG:  /dev/stderr
+      KONG_PROXY_LISTEN:     0.0.0.0:8000, 0.0.0.0:8443 ssl
+      KONG_ADMIN_LISTEN:     0.0.0.0:8001, 0.0.0.0:8444 ssl
+      KONG_PLUGINS:          bundled,oidc,cookies-to-headers
+      KONG_LOG_LEVEL:        debug
+    restart: on-failure
+
+  konga:
+    image: pantsel/konga:0.14.7
+    depends_on:
+      - kong
+    networks:
+      - kong-net
+    ports:
+      - "1337:1337" # konga
+    environment:
+      DB_ADAPTER: postgres
+      DB_HOST: kong-db
+      DB_PORT: '5432'
+      DB_USER: kong
+      DB_DATABASE: api-gw
+      NODE_ENV: development
+    restart: on-failure
+
+  keycloak-db:
+    image: postgres:11-alpine
+    volumes: 
+      - keycloak-datastore:/var/lib/postgresql/data
+    networks:
+      - keycloak-net
+    ports:
+      - "25432:5432"
+    environment:
+      POSTGRES_DB:       keycloak
+      POSTGRES_USER:     keycloak
+      POSTGRES_PASSWORD: password
+    restart: on-failure
+
+  keycloak:
+    image: jboss/keycloak:8.0.1
+    depends_on:
+      - keycloak-db
+    networks:
+      - keycloak-net
+    ports:
+      - "8180:8080"
+    environment:
+      DB_VENDOR:   POSTGRES
+      DB_ADDR:     keycloak-db
+      DB_PORT:     5432
+      DB_DATABASE: keycloak
+      DB_USER:     keycloak
+      DB_PASSWORD: password
+      # Not needed because set in init.sh
+      #KEYCLOAK_USER:     admin
+      #KEYCLOAK_PASSWORD: admin
+    restart: on-failure
+
+  fastapi:
+    build:
+      context: ./FastAPI
+    image: uvicorn-fastapi-sqlalchemy:latest
+    ports:
+      - "5000:80"
+    restart: on-failure
+
+  # SET DOCKER_HOST to your Local IP address
+  users:
+    build:
+      context: ./Users
+    stdin_open: true
+    tty: true
+    image: users-fastapi:latest
+    depends_on:
+      - keycloak
+    ports:
+      - "3000:80"
+    environment:
+      MODULE_NAME: users
+      DOCKER_HOST: 192.168.0.33
+      SERVICE_3000_CHECK_HTTP: "/"
+      SERVICE_3000_CHECK_INTERVAL: "15s"
+      SERVICE_3000_CHECK_TIMEOUT: "1s"
+      SERVICE_3000_CHECK_DEREGISTER_AFTER: "10m"
+    restart: on-failure
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - 1025:1025
+      - 8025:8025
+    restart: on-failure

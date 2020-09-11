@@ -1,0 +1,14 @@
+  gmail_smtp:
+    image: namshi/smtp
+    container_name: payments_smtp
+    restart: always
+    ports:
+      - "587:587"
+    environment:
+      - GMAIL_USER=springconfirm@gmail.com
+      - GMAIL_PASSWORD=springauth
+      - PORT=587
+      - MAILNAME=gmail
+      #- RELAY_NETWORKS=:92.53.45.67
+    networks:
+      - my-network123

@@ -1,0 +1,25 @@
+version: '3.7'
+services:
+
+  referraldb:
+    image: mysql:5.7
+    restart: always
+    environment:
+      MYSQL_DATABASE: 'referral'
+      MYSQL_USER: 'referral'
+      MYSQL_PASSWORD: 'password'
+      MYSQL_ROOT_PASSWORD: 'password12345'
+    volumes:
+      - ./db:/var/lib/mysql
+  referral:
+    image: server_helper_refferal:latest
+    depends_on:
+        - referraldb
+    ports:
+      - 25000:5050
+  consul:
+    image: consul
+    ports:
+      - 8500:8500
+    command: agent -server -ui -node=server-1 -bootstrap-expect=1 -client=0.0.0.0
+    restart: always

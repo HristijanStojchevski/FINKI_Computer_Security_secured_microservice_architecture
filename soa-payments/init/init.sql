@@ -1,0 +1,1 @@
+-- We can add SQL init logic here, though the manual ORM init logic should be enough for now

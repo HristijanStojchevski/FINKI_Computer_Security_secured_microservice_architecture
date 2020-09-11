@@ -1,0 +1,274 @@
+version: "3"
+networks:
+  kong-net:
+#  ngnix-proxy:
+services:
+#  reverse:
+#    container_name: reverse
+#    hostname: reverse
+#    image: ngnix
+#    ports:
+#      - 80:80
+#      - 443:443
+#    volumes:
+#      - ./reverse-proxy/config:/etc/ngnix
+#      - ./reverse-proxy/certs:/etc/ssl/private      
+      
+  kong-db:
+    image: postgres:11-alpine
+    volumes:
+      - ./kong-konga-keycloak/kong-datastore:/var/lib/postgresql/data
+    networks:
+      - kong-net
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB:       api-gw
+      POSTGRES_USER:     kong
+      POSTGRES_PASSWORD: kong
+    restart: on-failure
+
+  kong-session-store:
+    image: redis:alpine3.12
+    ports:
+      - 6379:6379
+    restart: on-failure
+
+  kong:
+    build:
+      context: ./kong-konga-keycloak/
+    image: kong:2.0.0-alpine-oidc
+    depends_on:
+      - kong-db
+      - kong-session-store
+    networks:
+      - kong-net
+    ports:
+      - "8000:8000" # Listener
+      - "8001:8001" # Admin API
+      - "8443:8443" # Listener  (SSL)
+      - "8444:8444" # Admin API (SSL)
+    environment:
+      KONG_NGINX_PROXY_INCLUDE: ./nginx-redis.kong.conf
+      KONG_DATABASE:         postgres
+      KONG_PG_HOST:          kong-db
+      KONG_PG_PORT:          5432
+      KONG_PG_USER:          kong
+      KONG_PG_PASSWORD:      kong
+      KONG_PG_DATABASE:      api-gw
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG:  /dev/stderr
+      KONG_ADMIN_ERROR_LOG:  /dev/stderr
+      KONG_PROXY_LISTEN:     0.0.0.0:8000, 0.0.0.0:8443 ssl
+      KONG_ADMIN_LISTEN:     0.0.0.0:8001, 0.0.0.0:8444 ssl
+      KONG_PLUGINS:          bundled,oidc,cookies-to-headers
+      KONG_LOG_LEVEL:        debug
+    restart: on-failure
+
+  konga:
+    image: pantsel/konga:0.14.7
+    depends_on:
+      - kong
+    networks:
+      - kong-net
+    ports:
+      - "1337:1337" # konga
+    environment:
+      DB_ADAPTER: postgres
+      DB_HOST: kong-db
+      DB_PORT: '5432'
+      DB_USER: kong
+      DB_DATABASE: api-gw
+      NODE_ENV: development
+#      SSL_KEY_PATH: ./Certificates
+#      SSL_CRT_PATH: ./Certificates
+    restart: on-failure
+
+  keycloak-db:
+    image: postgres:11-alpine
+    volumes:
+      - ./kong-konga-keycloak/keycloak-datastore:/var/lib/postgresql/data
+#    networks:
+#      - keycloak-net
+#    ports:
+#      - "25432:5432"
+    environment:
+      POSTGRES_DB:       keycloak
+      POSTGRES_USER:     keycloak
+      POSTGRES_PASSWORD: password
+    restart: on-failure
+
+  keycloak:
+    image: jboss/keycloak:8.0.1
+    depends_on:
+      - keycloak-db
+#    networks:
+#      - keycloak-net
+    ports:
+      - "8180:8080"
+    environment:
+      DB_VENDOR:   POSTGRES
+      DB_ADDR:     keycloak-db
+      DB_PORT:     5432
+      DB_DATABASE: keycloak
+      DB_USER:     keycloak
+      DB_PASSWORD: password
+      # Not needed because set in init.sh
+      #KEYCLOAK_USER:     admin
+      #KEYCLOAK_PASSWORD: admin
+    restart: on-failure
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.0
+#    ports:
+#      - 1025:1025
+#      - 8025:8025
+    restart: on-failure
+
+  users:
+    build:
+      context: ./kong-konga-keycloak/Users
+    stdin_open: true
+    tty: true
+    image: users-fastapi:latest
+    depends_on:
+      - keycloak
+    networks:
+      - kong-net
+    ports:
+      - "3000:80"
+    environment:
+      MODULE_NAME: users
+      DOCKER_HOST: 192.168.99.106
+      SERVICE_3000_CHECK_HTTP: "/"
+      SERVICE_3000_CHECK_INTERVAL: "15s"
+      SERVICE_3000_CHECK_TIMEOUT: "1s"
+      SERVICE_3000_CHECK_DEREGISTER_AFTER: "10m"
+    restart: on-failure
+
+#  referraldb:
+#    image: mysql:5.7
+#    restart: always
+#    networks:
+#     - kong-net
+#    environment:
+#      MYSQL_DATABASE: 'referral'
+#      MYSQL_USER: 'referral'
+#      MYSQL_PASSWORD: 'password'
+#      MYSQL_ROOT_PASSWORD: 'password12345'
+#    volumes:
+#      - ./referral/db:/var/lib/mysql
+      
+#  referral:
+#    build:
+#      context: ./referral
+#    networks:
+#      - kong-net
+#    depends_on:
+#      - referraldb
+#    ports:
+#      - 25000:5050
+
+#  ps_postgres:
+#    image: postgres
+#    networks:
+#      - kong-net
+#    container_name: ps_postgres
+#    volumes:
+#      - ./soa-payments/ps-data:/var/lib/postgresql/data
+#      - ./soa-payments/init/init.sql:/docker-entrypoint-initdb.d/init.sql
+#    ports:
+#      - 5432:5432
+#    environment:
+#      - POSTGRES_DB=payment_service
+#      - POSTGRES_USER=ps_user
+#      - POSTGRES_PASSWORD=ps_123
+#    networks:
+#      - my-network123
+
+#  payments:
+#    build:
+#      context: ./soa-payments
+#      dockerfile: Dockerfile
+#    networks:
+#      - kong-net
+#    environment:
+#      - REFERRALS_IP=referral
+#      - REFERRALS_PORT=5050
+#      - USERS_IP=users
+#      - USERS_PORT=80
+#      - PAYMENTS_PORT=8000
+#      - SMTP_PORT=465
+#      - DATABASE_URI=postgresql://ps_user:ps_123@ps_postgres/payment_service
+#      - ME=springconfirm@gmail.com
+#      - MP=springauth
+#      - SPK=rg3CN5pLXoI00LvYfHmV75vcp84TP5vwgAGqz
+#      - SRK=t7ttJYlmMNY00sZLL2IZGgxwHX2ajDoYhLlcn
+#    ports:
+#      - 25001:8000
+  
+#  location-register:
+#   build:
+#    context: ./location-register
+#    stdin_open: true
+#    tty: true
+#    image: register-fastapi:latest
+#    networks:
+#      - kong-net
+#   ports:
+#      - "3010:80"
+#    environment:
+#      SERVICE_3001_CHECK_HTTP: "/"
+#      SERVICE_3001_CHECK_INTERVAL: "15s"
+#      SERVICE_3001_CHECK_TIMEOUT: "1s"
+#      SERVICE_3001_CHECK_DEREGISTER_AFTER: "10m"
+#    restart: on-failure
+
+  rent-spring-db:
+    #   Use the Docker Image postgres. This will pull the newest release.
+    image: "postgres"
+    #   Give the container the name my_postgres. You can changes to something else.
+    container_name: "rent_postgres"
+    #   Setup the username, password, and database name. You can changes these values.
+    environment:
+      - POSTGRES_USER=rent
+      - POSTGRES_PASSWORD=Rental123!
+      - POSTGRES_DB=rental
+    #   Maps port 54320 (localhost) to port 5432 on the container ONLY ON LINUX. So probably ok when dockerizing all services. You can change the ports to fix your needs for development.
+    ports:
+      - "54320:5433"
+    #   Set a volume some that database is not lost after shutting down the container.
+    volumes:
+      - ./rental-postgres-data:/var/lib/postgresql/data
+  #   Service for the spring-boot-app
+  spring-app:
+    image: springboot-rent-app:latest
+    container_name: "rent_spring"
+    links:
+      - rent-spring-db:database
+    build:
+      context: ./WebProgramming2019-2020/spring/
+      dockerfile: Dockerfile
+    environment:
+       SPRING_DATASOURCE_URL: jdbc:postgresql://rent-spring-db/rental
+       client.url: ${DOCKER_HOST_IP}
+    expose:
+      - "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - rent-spring-db
+    restart: always
+  react-app:
+    image: react-rent-app:latest
+    container_name: "rent_react"
+    build:
+      context: ./WebProgramming2019-2020/rent-scoot/
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_BACKEND_IP: ${DOCKER_HOST_IP}
+    ports:
+      - "3050:80"
+    depends_on:
+      - spring-app
+ 

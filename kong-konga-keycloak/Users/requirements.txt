@@ -1,0 +1,5 @@
+pyjwt[crypto]
+requests
+python-keycloak
+python-multipart
+python-consul==1.1.0
